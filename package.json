@@ -132,6 +132,8 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "check": "npm run compile && node tools/check-injector.js && node tools/check-apply.js",
+    "release": "pwsh -NoProfile -File tools/release.ps1",
+    "release:dry": "pwsh -NoProfile -File tools/release.ps1 -DryRun",
     "package": "vsce package"
   },
   "devDependencies": {
