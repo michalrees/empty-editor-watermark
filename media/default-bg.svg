@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000" role="img" aria-label="Empty Editor Watermark default background">
+  <!-- 自制默认底图（本扩展作者绘制，MIT）：柔和的同心圆角框 + 点阵 + 一条曲线。
+       颜色刻意压低对比度，配合 CSS 的 opacity 使用，浅色/深色主题下都不抢字。 -->
+  <defs>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b8dd6" stop-opacity="0.55" />
+      <stop offset="0.55" stop-color="#7f7ad6" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#d68fa8" stop-opacity="0.28" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.72" cy="0.28" r="0.75">
+      <stop offset="0" stop-color="#8ab4f8" stop-opacity="0.22" />
+      <stop offset="1" stop-color="#8ab4f8" stop-opacity="0" />
+    </radialGradient>
+    <pattern id="dots" width="48" height="48" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="2" fill="#7b8794" fill-opacity="0.16" />
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#glow)" />
+  <rect width="1600" height="1000" fill="url(#dots)" />
+
+  <g fill="none" stroke="url(#stroke)" stroke-linejoin="round">
+    <rect x="170" y="120" width="1260" height="760" rx="72" stroke-width="10" />
+    <rect x="320" y="225" width="960" height="550" rx="52" stroke-width="8" />
+    <rect x="470" y="330" width="660" height="340" rx="34" stroke-width="6" />
+    <path d="M120 862 C 380 742, 620 906, 880 786 S 1330 690, 1500 762"
+          stroke-width="14" stroke-linecap="round" />
+    <path d="M120 916 C 400 812, 640 952, 900 846 S 1340 758, 1500 820"
+          stroke-width="8" stroke-linecap="round" opacity="0.55" />
+  </g>
+</svg>

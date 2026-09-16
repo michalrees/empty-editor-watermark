@@ -1,0 +1,142 @@
+{
+  "name": "empty-editor-watermark",
+  "displayName": "Empty Editor Watermark",
+  "description": "给空编辑器铺自定义背景图（水印），可隐藏 VS logo 与快捷键提示；自带注入器，不依赖 CSS 注入类扩展。",
+  "version": "0.1.0",
+  "publisher": "YuHaoran251",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "watermark",
+    "background",
+    "wallpaper",
+    "empty editor",
+    "customization"
+  ],
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/michalrees/empty-editor-watermark"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "emptyEditorWatermark.apply",
+        "title": "应用/更新水印",
+        "category": "Watermark"
+      },
+      {
+        "command": "emptyEditorWatermark.remove",
+        "title": "移除水印（还原 workbench.html）",
+        "category": "Watermark"
+      },
+      {
+        "command": "emptyEditorWatermark.pickImage",
+        "title": "选择背景图…",
+        "category": "Watermark"
+      },
+      {
+        "command": "emptyEditorWatermark.showCss",
+        "title": "查看生成的水印 CSS",
+        "category": "Watermark"
+      }
+    ],
+    "configuration": {
+      "title": "Empty Editor Watermark",
+      "properties": {
+        "emptyEditorWatermark.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "总开关。开启时会把水印样式写入 VS Code 安装目录的 workbench.html；关闭时会移除已写入的样式。"
+        },
+        "emptyEditorWatermark.imagePath": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "背景图的绝对路径（留空 = 用扩展自带的自制默认图）。支持 file:/// URI 与 ~ 前缀。图片不会被复制，直接就地从原位置读取。"
+        },
+        "emptyEditorWatermark.imageFit": {
+          "type": "string",
+          "enum": [
+            "cover",
+            "contain"
+          ],
+          "default": "cover",
+          "description": "cover = 放大铺满、超出部分裁掉；contain = 完整装下、必然有一边留白。"
+        },
+        "emptyEditorWatermark.opacity": {
+          "type": "number",
+          "default": 0.9,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "背景图透明度（0.1 很淡，1 完全不透明）。只影响图片，不影响窗口透明度。"
+        },
+        "emptyEditorWatermark.position": {
+          "type": "string",
+          "enum": [
+            "top-right",
+            "top-left",
+            "bottom-right",
+            "bottom-left",
+            "center"
+          ],
+          "default": "top-right",
+          "description": "水印文字块（VS logo + 快捷键提示）的位置。若 hideLogo 与 hideCommands 都为 true，此项没有视觉效果。"
+        },
+        "emptyEditorWatermark.scale": {
+          "type": "number",
+          "default": 0.48,
+          "minimum": 0.1,
+          "maximum": 2,
+          "description": "水印文字块的缩放（transform: scale）。只影响文字块，不影响背景图。"
+        },
+        "emptyEditorWatermark.hideLogo": {
+          "type": "boolean",
+          "default": true,
+          "description": "隐藏空编辑器里的 VS Code logo。"
+        },
+        "emptyEditorWatermark.hideCommands": {
+          "type": "boolean",
+          "default": true,
+          "description": "隐藏空编辑器里的快捷键提示（「显示所有命令」那一列）。"
+        },
+        "emptyEditorWatermark.panelWidth": {
+          "type": "number",
+          "default": 261,
+          "description": "水印文字块的宽度（px）。仅在显示 logo / 快捷键提示时有意义。"
+        },
+        "emptyEditorWatermark.panelFontSize": {
+          "type": "number",
+          "default": 19,
+          "description": "水印文字块的基准字号（px），会与 scale 叠加。"
+        },
+        "emptyEditorWatermark.frostedPanel": {
+          "type": "boolean",
+          "default": false,
+          "description": "给水印文字块加半透明磨砂底（图片较花、文字不好认时开启）。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "check": "npm run compile && node tools/check-injector.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  }
+}
