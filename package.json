@@ -131,7 +131,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "check": "npm run compile && node tools/check-injector.js",
+    "check": "npm run compile && node tools/check-injector.js && node tools/check-apply.js",
     "package": "vsce package"
   },
   "devDependencies": {

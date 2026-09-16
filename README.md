@@ -86,7 +86,7 @@ VS Code **没有**任何公开 API 能给工作台注入 CSS —— 本机 1.138
 npm install
 npm run compile      # 编译到 out/
 npm run watch        # 增量编译
-npm run check        # compile + 注入器自检（URL 转换 / CSS 生成 / patch / strip / 往返还原）
+npm run check        # compile + 两套自检（注入器单测 + 端到端冒烟）
 npm run package      # 生成 .vsix
 ```
 
@@ -96,7 +96,12 @@ npm run package      # 生成 .vsix
 cmd /c mklink /J "%USERPROFILE%\.vscode\extensions\yuhaoran251.empty-editor-watermark" "<你的工程目录>"
 ```
 
-> `tools/check-injector.js` 直接 require 编译产物 `out/injector.js` —— 注入器被刻意写成不 import `vscode` 的纯函数，就是为了能这样测。**改注入逻辑后请先跑 `npm run check`**。
+> 两套自检（`npm run check` 会依次跑）：
+>
+> - `tools/check-injector.js` —— 纯函数单测：URL 转换、CSS 生成、patch 幂等、strip 只删自己、patch→strip 往返还原。注入器被刻意写成不 import `vscode` 的纯函数，就是为了能直接 require 编译产物来测
+> - `tools/check-apply.js` —— 端到端冒烟：stub 掉 `vscode` 后真跑一遍 `activate()` / `apply()` / `remove()`，目标是一个**临时 appRoot 里的 workbench.html 副本**，断言注入位置、备份、幂等、设置更新、移除后逐字节还原、目标缺失不崩。**绝不碰真实安装目录**
+>
+> **改注入逻辑或写文件逻辑后请先跑 `npm run check`。**
 
 ## 许可
 
