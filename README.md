@@ -1,6 +1,14 @@
 # Empty Editor Watermark
 
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/YuHaoran251.empty-editor-watermark?label=marketplace)](https://marketplace.visualstudio.com/items?itemName=YuHaoran251.empty-editor-watermark)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/YuHaoran251.empty-editor-watermark)](https://marketplace.visualstudio.com/items?itemName=YuHaoran251.empty-editor-watermark)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 给**空编辑器**（那个显示 VS logo 与快捷键提示的"水印"区域）铺一张自定义背景图，并可选择隐藏 logo 与快捷键提示——**自带注入器，不需要 `be5invis.vscode-custom-css`，也不用把 CSS 复制到别处、不用手写 `vscode_custom_css.imports`**。
+
+```bash
+code --install-extension YuHaoran251.empty-editor-watermark
+```
 
 ## 它做什么
 
