@@ -2,13 +2,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+  ALL_MARKERS,
+  applyBlocks,
+  BlockSpec,
   buildBlock,
   buildCss,
-  extractBlock,
+  buildNoticeCss,
   hasBlock,
-  patchHtml,
+  NOTICE_MARKERS,
   stripBlock,
   toVscodeFileUrl,
+  WATERMARK_MARKERS,
   ImageFit,
   WatermarkOptions,
   WatermarkPosition
@@ -121,6 +125,22 @@ class WatermarkService {
     this.out.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`);
   }
 
+  /** 当前配置下"应该注入哪些块"，顺序就是它们写进文件里的顺序 */
+  private desiredBlocks(): BlockSpec[] {
+    const cfg = vscode.workspace.getConfiguration(SECTION);
+    const { options } = readOptions(this.context);
+    const blocks: BlockSpec[] = [{ block: buildBlock(buildCss(options)), markers: WATERMARK_MARKERS }];
+    if (cfg.get<boolean>('hideCorruptNotice', true)) {
+      blocks.push({ block: buildBlock(buildNoticeCss(), NOTICE_MARKERS), markers: NOTICE_MARKERS });
+    }
+    return blocks;
+  }
+
+  /** 文件里是否还有本扩展的任何一块注入 */
+  private anyInjected(html: string): boolean {
+    return ALL_MARKERS.some((markers) => hasBlock(html, markers));
+  }
+
   /** 首次改动前留一份原样备份，方便手动还原 */
   private backupOnce(file: string, html: string): void {
     const bak = file + BAK_SUFFIX;
@@ -168,9 +188,9 @@ class WatermarkService {
       return;
     }
 
-    const { options, image } = readOptions(this.context);
+    const { image } = readOptions(this.context);
     this.reportProblem(image.problem);
-    const block = buildBlock(buildCss(options));
+    const blocks = this.desiredBlocks();
     const targets = this.workbenchFiles();
     if (targets.length === 0) {
       void vscode.window.showErrorMessage(`找不到 workbench.html（appRoot=${vscode.env.appRoot}）`);
@@ -185,7 +205,7 @@ class WatermarkService {
       try {
         const html = fs.readFileSync(file, 'utf8');
         this.backupOnce(file, html);
-        const { html: next, changed } = patchHtml(html, block);
+        const { html: next, changed } = applyBlocks(html, blocks);
         if (changed) {
           fs.writeFileSync(file, next, 'utf8');
           updated.push(path.basename(file));
@@ -209,7 +229,7 @@ class WatermarkService {
       return;
     }
     this.log('完成，等待重载窗口生效');
-    await this.promptReload('水印已写入 workbench.html，重载窗口后生效。');
+    await this.promptReload('水印（与「安装损坏」提示的隐藏规则）已写入 workbench.html，重载窗口后生效。');
   }
 
   /** 移除注入（只删本扩展那段；be5invis / shalldie 的注入保持原样） */
@@ -220,7 +240,11 @@ class WatermarkService {
     for (const file of this.workbenchFiles()) {
       try {
         const html = fs.readFileSync(file, 'utf8');
-        const { html: next, removed: did } = stripBlock(html);
+        let next = html;
+        for (const markers of ALL_MARKERS) {
+          next = stripBlock(next, markers).html;
+        }
+        const did = next !== html;
         if (did) {
           fs.writeFileSync(file, next, 'utf8');
           removed.push(path.basename(file));
@@ -255,7 +279,7 @@ class WatermarkService {
     if (!cfg.get<boolean>('enabled', true)) {
       const anyInjected = this.workbenchFiles().some((f) => {
         try {
-          return hasBlock(fs.readFileSync(f, 'utf8'));
+          return this.anyInjected(fs.readFileSync(f, 'utf8'));
         } catch {
           return false;
         }
@@ -266,12 +290,12 @@ class WatermarkService {
       return;
     }
 
-    const { options } = readOptions(this.context);
-    const block = buildBlock(buildCss(options));
+    const blocks = this.desiredBlocks();
     const stale = this.workbenchFiles().some((f) => {
       try {
         const html = fs.readFileSync(f, 'utf8');
-        return !hasBlock(html) || extractBlock(html) !== block;
+        // applyBlocks 是幂等的：算出来的结果与磁盘一致 = 无需写盘
+        return applyBlocks(html, blocks).html !== html;
       } catch {
         return false;
       }
@@ -322,13 +346,19 @@ class WatermarkService {
   /** 把当前会生成的 CSS 打开成只读文档，方便核对/排查 */
   public async showCss(): Promise<void> {
     const { options, image } = readOptions(this.context);
+    const cfg = vscode.workspace.getConfiguration(SECTION);
+    const hideNotice = cfg.get<boolean>('hideCorruptNotice', true);
     const header =
       `/* 生成来源：Empty Editor Watermark\n` +
       ` * 背景图  : ${image.file}${image.isDefault ? '（扩展自带默认图）' : ''}\n` +
       ` * URL     : ${options.imageUrl}\n` +
       ` * 目标文件: ${this.workbenchFiles().join('\n *           ') || '(未找到 workbench.html)'}\n` +
+      ` * 隐藏损坏提示: ${hideNotice ? '开（emptyEditorWatermark.hideCorruptNotice）' : '关'}\n` +
       ` * 提示    : 本文件是只读快照；改效果请改设置或执行命令。\n */\n\n`;
-    const doc = await vscode.workspace.openTextDocument({ content: header + buildCss(options), language: 'css' });
+    const body = hideNotice
+      ? buildCss(options) + '\n\n' + buildNoticeCss()
+      : buildCss(options);
+    const doc = await vscode.workspace.openTextDocument({ content: header + body, language: 'css' });
     await vscode.window.showTextDocument(doc, { preview: true });
   }
 }

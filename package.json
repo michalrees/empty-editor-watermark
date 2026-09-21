@@ -1,8 +1,8 @@
 {
   "name": "empty-editor-watermark",
   "displayName": "Empty Editor Watermark",
-  "description": "给空编辑器铺自定义背景图（水印），可隐藏 VS logo 与快捷键提示；自带注入器，不依赖 CSS 注入类扩展。",
-  "version": "0.1.0",
+  "description": "给空编辑器铺自定义背景图（水印），可隐藏 VS logo 与快捷键提示；自带注入器，并自动隐藏 VS Code 的「安装似乎损坏」通知。",
+  "version": "0.2.1",
   "publisher": "YuHaoran251",
   "license": "MIT",
   "engines": {
@@ -58,6 +58,12 @@
           "default": true,
           "scope": "window",
           "description": "总开关。开启时会把水印样式写入 VS Code 安装目录的 workbench.html；关闭时会移除已写入的样式。"
+        },
+        "emptyEditorWatermark.hideCorruptNotice": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "隐藏 VS Code 的「{0} 安装似乎损坏，请重新安装」通知。成因：本扩展要改 workbench.html，而 VS Code 1.9x 起会校验它的 checksum，于是每次启动都会弹这条提示（点「不再显示」也只对当前版本有效）。开启后会往 workbench.html 注入一段纯 CSS 把该通知隐藏（不改 CSP、不改校验逻辑）；VS Code 改文案后可能需要在 injector.ts 的 CORRUPT_NOTICE_TEXTS 里补充字符串。"
         },
         "emptyEditorWatermark.imagePath": {
           "type": "string",

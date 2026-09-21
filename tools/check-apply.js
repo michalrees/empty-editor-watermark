@@ -113,7 +113,7 @@ function makeEnv(settings) {
     }
   };
 
-  return { root, wbFile, vscodeStub, context, commands, messages };
+  return { root, wbFile, settings, vscodeStub, context, commands, messages };
 }
 
 function loadExtension(vscodeStub) {
@@ -147,6 +147,13 @@ const read = (f) => fs.readFileSync(f, 'utf8');
   ok('默认透明度 0.9', html1.includes('opacity: 0.9'));
   ok('留下备份', fs.existsSync(env1.wbFile + '.bak-empty-editor-watermark'));
   ok('备份内容 = 注入前的原样', read(env1.wbFile + '.bak-empty-editor-watermark') === SAMPLE);
+
+  const notice1 = /<!-- EMPTY-EDITOR-WATERMARK-NOTICE:START -->([\s\S]*?)<!-- EMPTY-EDITOR-WATERMARK-NOTICE:END -->/.exec(html1);
+  ok('默认注入「隐藏损坏提示」块', !!notice1);
+  ok('通知块排在底图块之后', html1.indexOf('EMPTY-EDITOR-WATERMARK-NOTICE:START') > html1.indexOf('EMPTY-EDITOR-WATERMARK:START'));
+  ok('通知隐藏覆盖 toast 与通知中心', !!notice1 && notice1[1].includes('.notification-toast-container') && notice1[1].includes('.notifications-list-container'));
+  ok('通知隐藏是纯 CSS（块内无脚本）', !!notice1 && !notice1[1].includes('<script') && notice1[1].includes('display: none !important'));
+  ok('通知隐藏包含中英文文案匹配', !!notice1 && notice1[1].includes('appears to be corrupt') && notice1[1].includes('安装似乎损坏'));
 
   // ── 场景 2：重复激活幂等 ────────────────────────────────────────────
   console.log('\n== 再次激活：幂等，不重复注入 ==');
@@ -193,6 +200,25 @@ const read = (f) => fs.readFileSync(f, 'utf8');
   ok('hideLogo=false 后不再隐藏 .letterpress', !/\.letterpress\s*\{/.test(html3));
   ok('hideCommands 缺省仍为 true → 仍隐藏 .shortcuts', /\.shortcuts\s*\{/.test(html3));
 
+  // ── 场景 3.5：hideCorruptNotice 开关 ───────────────────────────────
+  console.log('\n== hideCorruptNotice=false → 不注入通知隐藏块；再打开 → 补上 ==');
+  const envN = makeEnv({ hideCorruptNotice: false });
+  const extN = loadExtension(envN.vscodeStub);
+  extN.activate(envN.context);
+  await tick();
+  const htmlOff = read(envN.wbFile);
+  ok('底图块仍在', htmlOff.includes('EMPTY-EDITOR-WATERMARK:START'));
+  ok('通知块没有注入', !htmlOff.includes('EMPTY-EDITOR-WATERMARK-NOTICE'));
+  ok('别家注入完好', htmlOff.includes('VSCODE-CUSTOM-CSS-START'));
+
+  envN.settings.hideCorruptNotice = true;
+  await envN.commands.get('emptyEditorWatermark.apply')();
+  await tick();
+  const htmlOn = read(envN.wbFile);
+  ok('打开开关后通知块出现', htmlOn.includes('EMPTY-EDITOR-WATERMARK-NOTICE:START'));
+  ok('底图块仍只有一份', htmlOn.split('EMPTY-EDITOR-WATERMARK:START').length - 1 === 1);
+  ok('通知块只有一份', htmlOn.split('EMPTY-EDITOR-WATERMARK-NOTICE:START').length - 1 === 1);
+
   // ── 场景 4：remove 只删自己那段 ─────────────────────────────────────
   console.log('\n== 移除水印 ==');
   const env4 = makeEnv({});
@@ -205,6 +231,7 @@ const read = (f) => fs.readFileSync(f, 'utf8');
   await tick();
   const html4 = read(env4.wbFile);
   ok('自己的标记已消失', !html4.includes('EMPTY-EDITOR-WATERMARK'));
+  ok('通知隐藏块也被移除', !html4.includes('EMPTY-EDITOR-WATERMARK-NOTICE'));
   ok('别家注入完好', html4.includes('VSCODE-CUSTOM-CSS-START') && html4.includes('.be5invis-marker'));
   ok('内容与原始样例完全一致（往返还原）', html4 === SAMPLE, JSON.stringify(html4.slice(-60)));
   ok('没有报错信息', !env4.messages.some((m) => m.startsWith('error')), env4.messages.join(' | '));

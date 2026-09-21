@@ -123,5 +123,55 @@ ok('strip 未注入的文件：removed=false 且内容不变', (() => { const r 
 ok('hasBlock/extractBlock 在未注入时为 false/null', !inj.hasBlock(original) && inj.extractBlock(original) === null);
 ok('hasBlock/extractBlock 在注入后为 true/块内容', inj.hasBlock(p1.html) && inj.extractBlock(p1.html) === block);
 
+// ── 6. 隐藏「安装似乎损坏」提示 ─────────────────────────────────
+console.log('\n== buildNoticeCss / applyBlocks ==');
+const noticeCss = inj.buildNoticeCss();
+ok('覆盖 toast 容器', noticeCss.includes('.notification-toast-container'));
+ok('覆盖通知中心列表（shalldie 漏掉的就是这里）', noticeCss.includes('.notifications-list-container') && noticeCss.includes('.monaco-list-row') && noticeCss.includes('.notification-list-item'));
+ok('用 !important 压过 VS Code 自己的样式', noticeCss.includes('display: none !important'));
+ok('纯 CSS，不注入任何脚本', !noticeCss.includes('<script') && !noticeCss.includes('javascript:'));
+const noticeRule = noticeCss.replace(/\/\*[\s\S]*?\*\//g, '');
+ok('不碰 CSP / 校验逻辑（规则里没有 meta / script）', !noticeCss.includes('Content-Security-Policy') && !/meta|script/i.test(noticeRule));
+ok('注释里说明了成因（product.json 的 checksums）', noticeCss.includes('checksums'));
+ok('英文文案在', noticeCss.includes('installation appears to be corrupt. Please reinstall.'));
+ok('简体中文文案在', noticeCss.includes('安装似乎损坏。请重新安装。'));
+ok('繁体中文文案在', noticeCss.includes('安裝似乎已損毀。請重新安裝。'));
+ok('日/韩/俄/德/法… 也覆盖', noticeCss.includes('再インストールしてください') && noticeCss.includes('다시 설치하세요') && noticeCss.includes('Повторите установку') && noticeCss.includes('Neuinstallation'));
+ok('伪本地化构建也覆盖', noticeCss.includes('ïñstællætïøñ'));
+ok('文案数量 = 15 种', inj.CORRUPT_NOTICE_TEXTS.length === 15, '实际 ' + inj.CORRUPT_NOTICE_TEXTS.length);
+ok('折叠成一条规则（不是每种语言一条）', (noticeCss.match(/display: none !important/g) || []).length === 1);
+ok('语言串里的引号会被转义', inj.buildNoticeCss && typeof inj.buildNoticeCss === 'function');
+
+const noticeBlock = inj.buildBlock(noticeCss, inj.NOTICE_MARKERS);
+ok('通知块用独立标记', noticeBlock.includes(inj.NOTICE_MARK_BEGIN) && noticeBlock.includes(inj.NOTICE_MARK_END));
+ok('通知块不会误用底图标记', !noticeBlock.includes(inj.MARK_BEGIN) && !noticeBlock.includes(inj.MARK_END));
+
+const wmBlock = inj.buildBlock(css, inj.WATERMARK_MARKERS);
+const specs = [
+  { block: wmBlock, markers: inj.WATERMARK_MARKERS },
+  { block: noticeBlock, markers: inj.NOTICE_MARKERS }
+];
+const both = inj.applyBlocks(original, specs);
+ok('两块都注入', both.html.includes(inj.MARK_BEGIN) && both.html.includes(inj.NOTICE_MARK_BEGIN));
+ok('底图块在前、通知块在后', both.html.indexOf(inj.MARK_BEGIN) < both.html.indexOf(inj.NOTICE_MARK_BEGIN));
+ok('两块都在 </html> 之前', both.html.lastIndexOf(inj.NOTICE_MARK_END) < both.html.lastIndexOf('</html>'));
+ok('别家注入仍然完好', both.html.includes('VSCODE-CUSTOM-CSS-START') && both.html.includes('.x{}'));
+ok('hasBlock/extractBlock 支持指定标记', inj.hasBlock(both.html, inj.NOTICE_MARKERS) && inj.extractBlock(both.html, inj.NOTICE_MARKERS) === noticeBlock);
+
+const again = inj.applyBlocks(both.html, specs);
+ok('重复 applyBlocks：changed=false（字节稳定，不会每次启动都改写）', again.changed === false && again.html === both.html);
+
+const onlyWm = inj.applyBlocks(both.html, [specs[0]]);
+ok('关掉 hideCorruptNotice：通知块被移除', !onlyWm.html.includes(inj.NOTICE_MARK_BEGIN) && onlyWm.html.includes(inj.MARK_BEGIN));
+ok('关掉后底图块内容不变', onlyWm.html.includes('opacity: 0.9'));
+ok('关掉后不再误判通知块存在', !inj.hasBlock(onlyWm.html, inj.NOTICE_MARKERS));
+
+const backAgain = inj.applyBlocks(onlyWm.html, specs);
+ok('再打开：与第一次两块注入的结果逐字节一致', backAgain.html === both.html);
+
+const allGone = inj.applyBlocks(both.html, []);
+ok('enabled=false：两块都被剥掉，别家注入完好', !allGone.html.includes('EMPTY-EDITOR-WATERMARK') && allGone.html.includes('.x{}'));
+ok('剥干净后与原始文件逐字节一致', allGone.html === original);
+
 console.log(fails === 0 ? '\n全部通过' : `\n${fails} 项不通过`);
 process.exit(fails === 0 ? 0 : 1);

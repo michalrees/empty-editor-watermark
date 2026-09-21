@@ -11,6 +11,21 @@
 export const MARK_BEGIN = '<!-- EMPTY-EDITOR-WATERMARK:START -->';
 export const MARK_END = '<!-- EMPTY-EDITOR-WATERMARK:END -->';
 
+/** 「安装似乎损坏」提示的隐藏块；与底图块分开，便于单独开关 */
+export const NOTICE_MARK_BEGIN = '<!-- EMPTY-EDITOR-WATERMARK-NOTICE:START -->';
+export const NOTICE_MARK_END = '<!-- EMPTY-EDITOR-WATERMARK-NOTICE:END -->';
+
+/** 一组标记 */
+export interface Markers {
+  begin: string;
+  end: string;
+}
+
+export const WATERMARK_MARKERS: Markers = { begin: MARK_BEGIN, end: MARK_END };
+export const NOTICE_MARKERS: Markers = { begin: NOTICE_MARK_BEGIN, end: NOTICE_MARK_END };
+/** 清理时按这个顺序把两块都剥掉 */
+export const ALL_MARKERS: readonly Markers[] = [WATERMARK_MARKERS, NOTICE_MARKERS];
+
 export type ImageFit = 'cover' | 'contain';
 export type WatermarkPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'center';
 
@@ -180,26 +195,31 @@ ${panelExtra}    font-size: ${fontSize}px;
 }
 
 /** 把 CSS 包成带标记的注入块 */
-export function buildBlock(css: string): string {
-  return `${MARK_BEGIN}\n<style>\n${css}</style>\n${MARK_END}`;
+export function buildBlock(css: string, markers: Markers = WATERMARK_MARKERS): string {
+  return `${markers.begin}\n<style>\n${css}</style>\n${markers.end}`;
 }
 
-/** 当前 HTML 里是否已有本扩展的注入块 */
-export function hasBlock(html: string): boolean {
-  return html.indexOf(MARK_BEGIN) >= 0 && html.indexOf(MARK_END) > html.indexOf(MARK_BEGIN);
+/** 当前 HTML 里是否已有指定标记的注入块 */
+export function hasBlock(html: string, markers: Markers = WATERMARK_MARKERS): boolean {
+  return html.indexOf(markers.begin) >= 0 && html.indexOf(markers.end) > html.indexOf(markers.begin);
 }
 
 /** 取出已注入的块内容（没有则返回 null） */
-export function extractBlock(html: string): string | null {
-  const s = html.indexOf(MARK_BEGIN);
+export function extractBlock(html: string, markers: Markers = WATERMARK_MARKERS): string | null {
+  const s = html.indexOf(markers.begin);
   if (s < 0) {
     return null;
   }
-  const e = html.indexOf(MARK_END, s);
+  const e = html.indexOf(markers.end, s);
   if (e < 0) {
     return null;
   }
-  return html.slice(s, e + MARK_END.length);
+  return html.slice(s, e + markers.end.length);
+}
+
+function insertBeforeHtmlEnd(html: string, block: string): string {
+  const idx = html.lastIndexOf('</html>');
+  return idx >= 0 ? `${html.slice(0, idx)}${block}\n${html.slice(idx)}` : `${html}\n${block}\n`;
 }
 
 /**
@@ -207,27 +227,29 @@ export function extractBlock(html: string): string | null {
  * 已有标记 → 原地替换（反复注入不会累积）；否则插到 </html> 之前
  * （文档顺序最后 = 同等特异性下压过其它注入的样式，迁移期不与 be5invis 打架）。
  */
-export function patchHtml(html: string, block: string): { html: string; changed: boolean } {
-  const s = html.indexOf(MARK_BEGIN);
+export function patchHtml(
+  html: string,
+  block: string,
+  markers: Markers = WATERMARK_MARKERS
+): { html: string; changed: boolean } {
+  const s = html.indexOf(markers.begin);
   if (s >= 0) {
-    const e = html.indexOf(MARK_END, s);
+    const e = html.indexOf(markers.end, s);
     if (e >= 0) {
-      const next = html.slice(0, s) + block + html.slice(e + MARK_END.length);
+      const next = html.slice(0, s) + block + html.slice(e + markers.end.length);
       return { html: next, changed: next !== html };
     }
   }
-  const idx = html.lastIndexOf('</html>');
-  const next = idx >= 0 ? `${html.slice(0, idx)}${block}\n${html.slice(idx)}` : `${html}\n${block}\n`;
-  return { html: next, changed: next !== html };
+  return { html: insertBeforeHtmlEnd(html, block), changed: true };
 }
 
-/** 移除注入块（连同它前后的空行），其余注入（be5invis 等）保持原样 */
-export function stripBlock(html: string): { html: string; removed: boolean } {
-  const s = html.indexOf(MARK_BEGIN);
+/** 移除注入块（连同它前面被我们插进去的换行），其余注入（be5invis 等）保持原样 */
+export function stripBlock(html: string, markers: Markers = WATERMARK_MARKERS): { html: string; removed: boolean } {
+  const s = html.indexOf(markers.begin);
   if (s < 0) {
     return { html, removed: false };
   }
-  const e = html.indexOf(MARK_END, s);
+  const e = html.indexOf(markers.end, s);
   if (e < 0) {
     return { html, removed: false };
   }
@@ -235,6 +257,102 @@ export function stripBlock(html: string): { html: string; removed: boolean } {
   while (start > 0 && (html[start - 1] === '\n' || html[start - 1] === '\r')) {
     start--;
   }
-  const next = html.slice(0, start) + html.slice(e + MARK_END.length);
+  const next = html.slice(0, start) + html.slice(e + markers.end.length);
   return { html: next, removed: true };
+}
+
+export interface BlockSpec {
+  block: string;
+  markers: Markers;
+}
+
+/**
+ * 把 HTML 变成"它应该是的样子"：先剥掉所有属于本扩展的块，再把启用的块按顺序插回 `</html>` 之前。
+ *
+ * 这样"开关任意一块"（包括 hideCorruptNotice 的切换）都只需要一次写盘，
+ * 而且反复调用是**字节稳定**的：同一个输入永远得到同一个输出，不会每次启动都改写文件。
+ */
+export function applyBlocks(html: string, blocks: readonly BlockSpec[]): { html: string; changed: boolean } {
+  let next = html;
+  for (const markers of ALL_MARKERS) {
+    next = stripBlock(next, markers).html;
+  }
+  for (const spec of blocks) {
+    next = insertBeforeHtmlEnd(next, spec.block);
+  }
+  return { html: next, changed: next !== html };
+}
+
+/**
+ * 「安装似乎损坏」提示的文案。
+ *
+ * 为什么会有这条提示：VS Code 1.9x 起，workbench 的 IntegrityService 会在启动时读
+ * product.json 的 `checksums`，把列出的核心文件逐个做 SHA256 校验
+ * （`vs/code/electron-browser/workbench/workbench.html` 就在列表里），只要有一个对不上就弹
+ * 「Your Code installation appears to be corrupt. Please reinstall.」。
+ * 而本扩展的工作方式就是改这个文件，所以**必然**会触发它。
+ *
+ * 我们是按用户明确意图改的文件，这条提示只会让人以为 VS Code 坏了，所以直接隐藏掉。
+ * 匹配方式：通知元素上的 aria-label 就是本地化后的消息文本，只能按子串匹配
+ * （提示里的「More Information」按钮是 `run()` 动作、不是链接，URL 不会出现在 DOM 里）。
+ * 目前覆盖 15 种语言/伪本地化；VS Code 改文案时按需补充即可。
+ */
+export const CORRUPT_NOTICE_TEXTS: readonly string[] = [
+  // English
+  'installation appears to be corrupt. Please reinstall.',
+  // 简体中文
+  '安装似乎损坏。请重新安装。',
+  // 繁體中文
+  '安裝似乎已損毀。請重新安裝。',
+  // 日本語
+  'インストールが壊れている可能性があります。再インストールしてください。',
+  // 한국어
+  '설치가 손상된 것 같습니다. 다시 설치하세요.',
+  // Deutsch
+  'Installation ist offenbar beschädigt. Führen Sie eine Neuinstallation durch.',
+  // Français
+  'semble être endommagée. Effectuez une réinstallation.',
+  // Español
+  'parece estar dañada. Vuelva a instalar.',
+  // Italiano
+  'sembra danneggiata. Reinstallare.',
+  // Português (Brasil)
+  'parece estar corrompida. Reinstale-o.',
+  // Русский
+  'повреждена. Повторите установку.',
+  // Polski
+  'prawdopodobnie jest uszkodzona. Spróbuj zainstalować ponownie.',
+  // Čeština
+  'je pravděpodobně poškozená. Proveďte prosím přeinstalaci.',
+  // Türkçe
+  'yüklemeniz bozuk gibi görünüyor. Lütfen yeniden yükleyin.',
+  // 伪本地化（VS Code 的 pseudo-localization 构建）
+  'ïñstællætïøñ æppëærs tø þë çørrµpt. Plëæsë rëïñstæll.'
+];
+
+/** 可能承载通知/通知列表项的容器（toast 与通知中心都盖上，避免从铃铛里漏出来） */
+const NOTICE_TARGETS = [
+  '.notification-toast-container',
+  '.notification-toast',
+  '.notifications-list-container .notification-list-item',
+  '.notifications-list-container .monaco-list-row'
+].join(',');
+
+/** 生成隐藏「安装似乎损坏」提示的 CSS（纯 CSS，不需要动 CSP；script-src 才是被限制的那个） */
+export function buildNoticeCss(): string {
+  const attributes = CORRUPT_NOTICE_TEXTS.map(
+    (text) => `[aria-label*='${text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}']`
+  ).join(',');
+  return [
+    '/* Empty Editor Watermark — 隐藏 VS Code 的「安装似乎损坏，请重新安装」通知。',
+    '   成因：本扩展按用户意图修改了 workbench.html，VS Code 的完整性校验（product.json 的',
+    '   checksums）因此对不上。提示本身对用户没有可用信息，故隐藏。',
+    '   匹配依据是通知上的 aria-label（本地化文案），VS Code 改文案后需要补充字符串；',
+    `   未覆盖的语言可在 CORRUPT_NOTICE_TEXTS 里加。 */`,
+    `:is(${NOTICE_TARGETS}):is(${attributes}),`,
+    `:is(${NOTICE_TARGETS}):has(${attributes}) {`,
+    '    display: none !important;',
+    '}',
+    ''
+  ].join('\n');
 }
