@@ -4,111 +4,89 @@
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/YuHaoran251.empty-editor-watermark)](https://marketplace.visualstudio.com/items?itemName=YuHaoran251.empty-editor-watermark)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-给**空编辑器**铺一张自定义背景图：编辑器区域空下来时自动打开一个水印页，打开文件时自动关掉，行为对齐 VS Code 内置的那块水印区域。
+给**空编辑器**（那个显示 VS logo 与快捷键提示的"水印"区域）铺一张自定义背景图，并可选择隐藏 logo 与快捷键提示——**自带注入器，不需要 `be5invis.vscode-custom-css`，也不用把 CSS 复制到别处、不用手写 `vscode_custom_css.imports`**。
 
 ```bash
 code --install-extension YuHaoran251.empty-editor-watermark
 ```
 
-> **0.2.0 起不再修改 VS Code 安装目录。** 0.1.x 是往安装目录的 `workbench.html` 里写 `<style>`，那会让 VS Code 的完整性校验失败，用户每次启动都会看到
-> **「你的 Code 安装似乎损坏，请重新安装」**。0.2.0 改成独立 Webview 页实现，安装目录一个字节都不碰。
-> 升级后本扩展会**自动把旧版注入清掉**（详见下面的「从 0.1.x 升级」）。
-
 ## 它做什么
 
-- 编辑器区域为空时自动显示水印页；打开文件后自动关闭（`closeWhenEditorOpens`）
-- 背景图：`cover` / `contain`、透明度、任意绝对路径（支持 `~`、`file:///`）或 `http(s)` 地址
-- 可选文字块：标识文字 + 三条命令（显示所有命令 / 打开文件 / 克隆 Git 仓库，点一下真的执行），
-  位置（右上/左上/右下/左下/居中）、缩放、宽度、字号、磨砂底
-- 改设置立刻生效（Webview 直接重渲染），**不需要重载窗口**
-- 中英文案按界面语言自动选，快捷键按平台显示（`Ctrl+Shift+P` / `⇧⌘P`）
+- 空编辑器背景图：`cover` / `contain`、透明度、任意图片路径（含 `~` 与 `file:///` 写法）
+- 隐藏 VS Code logo（`.letterpress`）与快捷键提示列表（`.shortcuts`），只留底图
+- 水印文字块的位置（右上/左上/右下/左下/居中）、缩放、宽度、字号，可选磨砂底
+- **VS Code 更新后自动重注入**：更新会换掉安装目录里的哈希子目录，注入必然丢失；本扩展启动时检测到注入缺失/过期就自动补齐并提示重载
+- 只处理自己那段注入：与其它注入类扩展（`be5invis.vscode-custom-css`、`shalldie.background`）互不破坏
 
-## 为什么是 Webview：那条「安装似乎损坏」是怎么来的
+## 为什么必须写 `workbench.html`
 
-VS Code **没有**任何公开 API 能给工作台注入 CSS（1.138 自带的 `vscode.d.ts` 里搜不到 css / inject / workbench 相关 API）。
-所以做背景图/改水印外观的扩展（`be5invis.vscode-custom-css`、`shalldie.background`、`subframe7536/vscode-custom-ui-style` …）
-走的都是同一条路：直接往安装目录的 `workbench.html` 写 `<style>`。
+VS Code **没有**任何公开 API 能给工作台注入 CSS —— 本机 1.138 自带的 `vscode.d.ts`（763 KB，权威 API 面）里搜不到 css / inject / workbench 相关 API。所有做背景图、改水印外观的扩展（包括 `be5invis.vscode-custom-css`、`shalldie.background`）走的都是同一条路：**直接往安装目录的 `workbench.html` 里写一段 `<style>`**。
 
-而 VS Code 1.9x 起在 **workbench 的 `IntegrityService`** 里加了自校验：启动时读 `product.json` 的 `checksums`，
-把列出的核心文件（其中就有 `vs/code/electron-browser/workbench/workbench.html`）逐个做 SHA256 比对，
-只要有一个对不上就写日志 `*** Installation has been modified on disk ***` 并弹出
-**「Your Code installation appears to be corrupt. Please reinstall.」**（按钮：More Information / Don't Show Again）。
+因此本扩展会：
 
-也就是说：**只要扩展改过 `workbench.html`，所有用户都会看到这条提示**，点「Don't Show Again」也只能压到下个 VS Code 版本——
-它的抑制记录带着 commit（`{dontShowPrompt, commit}`），VS Code 一更新就失效，于是又弹。
+1. 用 `vscode.env.appRoot` 定位 `<安装目录>/<哈希>/resources/app/out/vs/code/electron-browser/workbench/workbench.html`（同时处理 `workbench.esm.html`，存在才动）
+2. 首次改动前把原文件备份成 `workbench.html.bak-empty-editor-watermark`
+3. 把样式包在 `<!-- EMPTY-EDITOR-WATERMARK:START --> … END -->` 之间插到 `</html>` 之前（反复注入原地替换，不会累积；文档顺序靠后 → 同等特异性下压过别的注入）
+4. `移除水印` 只删自己那一段，别家注入原样保留
 
-0.1.x 的实测证据（本机 1.138.0，commit `7debcd0e`）：
+**首次运行会先问一次**是否允许修改安装目录（之后一直自动，含 VS Code 更新后）。
 
-| product.json 里 checksums 列出的 10 个文件 | 校验结果 |
-|---|---|
-| 其余 9 个 | 全部一致 |
-| `vs/code/electron-browser/workbench/workbench.html` | **唯一不一致**（被注入改写） |
+## 安装与使用
 
-0.2.0 的解法：**不碰安装目录**，改为打开一个属于本扩展的 Webview 页来铺背景图。
-代价是它成了一个真正的标签页，而不是"长在空编辑器里"；换来的是安装目录始终原样、校验永远通过。
+1. 安装扩展（或本地 `.vsix` 安装），重载窗口
+2. 首次会弹出提示 → 选 **应用水印**
+3. 若写入失败报 `EPERM/EACCES`：**以管理员身份重启 VS Code** 再执行一次命令（Program Files 下的安装目录默认不给普通用户写权限）
+4. 之后改任何设置都会自动重注入，**需要重载窗口生效**（扩展会给出「立即重载窗口」按钮）
 
-## 升级：从 0.1.x 到 0.2.0
-
-装上新版并重载窗口后，扩展会在激活时做一次（幂等的）清理：
-
-1. 找到 `<appRoot>/out/vs/code/electron-browser/workbench/workbench.html`（以及 `workbench.esm.html`，存在才处理）
-2. 只删掉 `<!-- EMPTY-EDITOR-WATERMARK:START --> … END -->` 这一段 —— `be5invis` / `shalldie` 等**别家的注入原样保留**
-3. 提示「立即重载窗口」；重载后 `workbench.html` 的校验和重新对得上，那条提示消失
-
-> - 清理是**写安装目录**的动作，Program Files 下可能报 `EPERM`：以管理员身份重启 VS Code，再执行命令
->   `Watermark: 清理旧版注入（0.1.x 写进安装目录的样式）`。
-> - 0.1.x 留下的备份 `workbench.html.bak-empty-editor-watermark` 不会被自动删除（它只是一份文件，
->   不参与校验，可自行清理）。
-> - 如果你同时装了 `be5invis.vscode-custom-css` 或 `shalldie.background`，它们仍然会改 `workbench.html`，
->   于是那条提示还会出现 —— 那是它们造成的，与本扩展无关；解决办法是改用不写安装目录的方案，或点 Don't Show Again。
-> - 忘记先升级就卸载了 0.1.x？手动删掉 `workbench.html` 里 `EMPTY-EDITOR-WATERMARK:START/END` 之间的内容即可。
-
-## 命令（命令面板搜 `Watermark`）
+### 命令（命令面板搜 `Watermark`）
 
 | 命令 | 作用 |
 |---|---|
-| `Watermark: 显示水印` | 打开/前置水印页（也会解除"用户刚关掉"的抑制） |
-| `Watermark: 关闭水印` | 关掉水印页 |
-| `Watermark: 选择背景图…` | 选图 → 写入 `imagePath` → 立即生效 |
-| `Watermark: 查看水印页源码` | 把当前渲染出的 HTML 开成只读文档，便于核对/排查 |
-| `Watermark: 清理旧版注入（0.1.x 写进安装目录的样式）` | 手动再清一次（失败时给管理员提示） |
-| `Watermark: 显示/刷新水印（0.1.x 兼容别名）` | 老命令名 `emptyEditorWatermark.apply` 的别名 |
+| `Watermark: 应用/更新水印` | 写入/刷新注入 |
+| `Watermark: 移除水印（还原 workbench.html）` | 只删本扩展那段注入 |
+| `Watermark: 选择背景图…` | 选图 → 写入 `imagePath` → 立即应用 |
+| `Watermark: 查看生成的水印 CSS` | 把当前会生成的 CSS 开成只读文档，便于核对/排查 |
 
-## 设置
+### 设置
 
 | 设置项 | 默认 | 说明 |
 |---|---|---|
-| `emptyEditorWatermark.enabled` | `true` | 总开关；关闭后不再自动显示，并关掉已打开的水印页 |
-| `emptyEditorWatermark.autoOpen` | `true` | 编辑器区域为空时自动打开 |
-| `emptyEditorWatermark.closeWhenEditorOpens` | `true` | 打开文件后自动关闭 |
-| `emptyEditorWatermark.panelTitle` | `""` | 标签页标题；留空 = 按界面语言（水印 / Watermark） |
-| `emptyEditorWatermark.imagePath` | `""` | 背景图绝对路径；留空用扩展自带的自制默认图；支持 `~`、`file:///`、`http(s)` |
+| `emptyEditorWatermark.enabled` | `true` | 总开关；关闭会移除已写入的样式 |
+| `emptyEditorWatermark.imagePath` | `""` | 背景图绝对路径；留空用扩展自带的自制默认图 |
 | `emptyEditorWatermark.imageFit` | `cover` | `cover` 铺满裁切 / `contain` 完整留白 |
-| `emptyEditorWatermark.opacity` | `0.9` | 图片透明度，只作用于图片，不影响文字 |
-| `emptyEditorWatermark.position` | `top-right` | 文字块位置（隐藏文字块时无视觉影响） |
+| `emptyEditorWatermark.opacity` | `0.9` | 图片透明度，只作用于图片 |
+| `emptyEditorWatermark.position` | `top-right` | 水印文字块位置（隐藏 logo+命令时无视觉影响） |
 | `emptyEditorWatermark.scale` | `0.48` | 文字块缩放 |
-| `emptyEditorWatermark.hideLogo` | `true` | 隐藏文字块顶部的标识文字（默认只留底图） |
-| `emptyEditorWatermark.hideCommands` | `true` | 隐藏命令列表 |
+| `emptyEditorWatermark.hideLogo` | `true` | 隐藏 VS logo |
+| `emptyEditorWatermark.hideCommands` | `true` | 隐藏快捷键提示列表 |
 | `emptyEditorWatermark.panelWidth` | `261` | 文字块宽度（px） |
 | `emptyEditorWatermark.panelFontSize` | `19` | 文字块基准字号（px） |
 | `emptyEditorWatermark.frostedPanel` | `false` | 给文字块加半透明磨砂底 |
 
-> 0.1.x 的设置项名字全部保留，语义基本不变：`hideLogo` / `hideCommands` 现在作用在**本扩展自己渲染的文字块**上
-> （0.1.x 是去隐藏 VS Code 内置的那个文字块）。默认两项都是 `true`，所以默认效果仍然是「只有一张底图」。
+## 从 `be5invis.vscode-custom-css` 迁移
+
+你可以在两者共存的情况下平滑切换（本扩展的注入在文档顺序上更靠后，同特异性下生效）：
+
+1. 装本扩展 → 首次提示选 **应用水印** → 重载窗口，确认效果与之前一致（底图、隐藏 logo/命令、透明度）
+2. 确认无误后，从 `settings.json` 的 `vscode_custom_css.imports` 里**删掉指向 `welcome.css` 的那一行**（动画那行 `updateHandler.js` 想留着就留着）
+3. 命令面板 → `Disable Custom CSS and JS`（`extension.uninstallCustomCSS`）移除 be5invis 的注入，或执行 `Reload Custom CSS and JS` 只刷新
+4. 重载窗口。此时安装目录里只剩本扩展一段注入
+
+> ⚠️ 顺序别反：先让本扩展生效、确认效果，再去掉 be5invis 那一路。中途如果两边都不生效，`workbench.html.bak-empty-editor-watermark` 和 be5invis 的 `.bak-custom-css` 都还在，可以手动还原。
 
 ## 卸载 / 还原
 
-- 0.2.0 不修改任何 VS Code 文件，**直接卸载即可**，不需要还原步骤
-- 从 0.1.x 升级上来且还没清理：卸载前先执行一次 `Watermark: 清理旧版注入…`，或手动删掉标记之间的内容
-- 后台若提示「安装已修改」（`*** Installation has been modified on disk ***`），那是 `be5invis` / `shalldie`
-  之类仍然在写 `workbench.html` 的扩展造成的
+- 想干净还原：先执行 `Watermark: 移除水印`，再卸载扩展
+- 忘记执行就卸载了：把 `workbench.html.bak-empty-editor-watermark` 覆盖回 `workbench.html`（注意这份备份是**首次注入前的原样**，若期间 be5invis 又注入过，用它覆盖会把那边一起清掉 —— 更稳的做法是手动删掉 `EMPTY-EDITOR-WATERMARK:START/END` 之间的内容）
+- 卸载扩展**不会**自动改回安装目录（改安装目录属于显式动作，交给用户决定）
 
 ## 已知限制
 
-- 水印是一个**标签页**（Webview 面板），会出现在标签栏里；VS Code 没有"在空编辑器区域里画东西"的公开 API
-- `closeWhenEditorOpens` 打开时，最后一个文件一关就会自动回来；不想要就把 `autoOpen` 或 `enabled` 关掉
-- 图片是**就地读取**的：移动/删除原图后重启窗口会退回扩展自带默认图并提示
-- 桌面版与 vscode.dev 都可以用（不写文件系统），但远程/Web 场景下图必须能被渲染进程访问到
+- **改设置后要重载窗口**才生效：样式是内联写进 `workbench.html` 的，没法在不重载的情况下热更（这也是所有同类扩展的通病）
+- VS Code 仍会提示「安装已修改」（`*** Installation has been modified on disk ***`）—— 这是注入类扩展的必然结果，点 Don't show again 即可；本扩展不做 checksum 修补
+- 窄窗口（≤900px）时文字块自动退回居中，避免压到别的内容
+- 图片是**就地读取**的：移动/删除原图后需要重新应用（会退回扩展自带默认图并提示）
+- 只支持桌面版 VS Code（需要能写安装目录）；Web / vscode.dev 不适用
 
 ## 开发
 
@@ -116,27 +94,22 @@ VS Code **没有**任何公开 API 能给工作台注入 CSS（1.138 自带的 `
 npm install
 npm run compile      # 编译到 out/
 npm run watch        # 增量编译
-npm run check        # compile + 三套自检
+npm run check        # compile + 两套自检（注入器单测 + 端到端冒烟）
 npm run package      # 生成 .vsix
 ```
 
-调试：用 VS Code 打开本目录按 `F5` 起扩展开发宿主；或把工程目录 junction 到扩展目录联调：
+调试：用 VS Code 打开本目录按 `F5` 起扩展开发宿主；或直接把工程目录做成扩展目录的 junction 联调：
 
 ```powershell
 cmd /c mklink /J "%USERPROFILE%\.vscode\extensions\yuhaoran251.empty-editor-watermark" "<你的工程目录>"
 ```
 
-三套自检（`npm run check` 依次跑）：
-
-- `tools/check-page.js` —— 纯函数单测：枚举/数值兜底、HTML/CSS 转义、生成的页面里**不得出现安装目录相关字样**、
-  CSP + nonce、默认只留底图、命令 id、中英文案与平台快捷键
-- `tools/check-legacy.js` —— 旧版清理单测：标记常量必须与 0.1.x 一致、只删自己的块、别家注入完好、
-  注入 → 清理**逐字节往返回原**、幂等、畸形文件不误删
-- `tools/check-apply.js` —— 端到端冒烟：stub 掉 `vscode` 与 `setTimeout` 后真跑 `activate()` 与各命令，
-  断言**干净的安装目录一个字节都不动**、旧注入被清掉、面板标题/CSP/图片 URI/命令转发、
-  自动开关、用户关掉后不硬弹、`enabled=false`、目标缺失不崩
-
-**改页面生成、文件读写或面板逻辑后，请先跑 `npm run check`。**
+> 两套自检（`npm run check` 会依次跑）：
+>
+> - `tools/check-injector.js` —— 纯函数单测：URL 转换、CSS 生成、patch 幂等、strip 只删自己、patch→strip 往返还原。注入器被刻意写成不 import `vscode` 的纯函数，就是为了能直接 require 编译产物来测
+> - `tools/check-apply.js` —— 端到端冒烟：stub 掉 `vscode` 后真跑一遍 `activate()` / `apply()` / `remove()`，目标是一个**临时 appRoot 里的 workbench.html 副本**，断言注入位置、备份、幂等、设置更新、移除后逐字节还原、目标缺失不崩。**绝不碰真实安装目录**
+>
+> **改注入逻辑或写文件逻辑后请先跑 `npm run check`。**
 
 ## 许可
 

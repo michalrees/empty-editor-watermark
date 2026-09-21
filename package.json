@@ -1,8 +1,8 @@
 {
   "name": "empty-editor-watermark",
   "displayName": "Empty Editor Watermark",
-  "description": "给空编辑器铺自定义背景图（水印）。以独立 Webview 页实现：不修改 VS Code 安装目录，不会触发「安装似乎损坏」。",
-  "version": "0.2.0",
+  "description": "给空编辑器铺自定义背景图（水印），可隐藏 VS logo 与快捷键提示；自带注入器，不依赖 CSS 注入类扩展。",
+  "version": "0.1.0",
   "publisher": "YuHaoran251",
   "license": "MIT",
   "engines": {
@@ -30,13 +30,13 @@
   "contributes": {
     "commands": [
       {
-        "command": "emptyEditorWatermark.show",
-        "title": "显示水印",
+        "command": "emptyEditorWatermark.apply",
+        "title": "应用/更新水印",
         "category": "Watermark"
       },
       {
-        "command": "emptyEditorWatermark.hide",
-        "title": "关闭水印",
+        "command": "emptyEditorWatermark.remove",
+        "title": "移除水印（还原 workbench.html）",
         "category": "Watermark"
       },
       {
@@ -46,17 +46,7 @@
       },
       {
         "command": "emptyEditorWatermark.showCss",
-        "title": "查看水印页源码",
-        "category": "Watermark"
-      },
-      {
-        "command": "emptyEditorWatermark.remove",
-        "title": "清理旧版注入（0.1.x 写进安装目录的样式）",
-        "category": "Watermark"
-      },
-      {
-        "command": "emptyEditorWatermark.apply",
-        "title": "显示/刷新水印（0.1.x 兼容别名）",
+        "title": "查看生成的水印 CSS",
         "category": "Watermark"
       }
     ],
@@ -67,31 +57,13 @@
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "description": "总开关。关闭后不再自动显示水印页，并关闭已打开的水印页。"
-        },
-        "emptyEditorWatermark.autoOpen": {
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "description": "编辑器区域为空时自动打开水印页。"
-        },
-        "emptyEditorWatermark.closeWhenEditorOpens": {
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "description": "打开文件后自动关闭水印页（更接近 VS Code 内置水印的行为）。"
-        },
-        "emptyEditorWatermark.panelTitle": {
-          "type": "string",
-          "default": "",
-          "scope": "window",
-          "description": "水印页的标签页标题。留空 = 按界面语言自动（水印 / Watermark）。"
+          "description": "总开关。开启时会把水印样式写入 VS Code 安装目录的 workbench.html；关闭时会移除已写入的样式。"
         },
         "emptyEditorWatermark.imagePath": {
           "type": "string",
           "default": "",
           "scope": "window",
-          "description": "背景图的绝对路径（留空 = 用扩展自带的自制默认图）。支持 ~ 前缀、file:/// 写法与 http(s) 地址。图片不被复制，就地读取。"
+          "description": "背景图的绝对路径（留空 = 用扩展自带的自制默认图）。支持 file:/// URI 与 ~ 前缀。图片不会被复制，直接就地从原位置读取。"
         },
         "emptyEditorWatermark.imageFit": {
           "type": "string",
@@ -107,7 +79,7 @@
           "default": 0.9,
           "minimum": 0,
           "maximum": 1,
-          "description": "背景图透明度（0.1 很淡，1 完全不透明）。只影响图片，不影响页面上的文字。"
+          "description": "背景图透明度（0.1 很淡，1 完全不透明）。只影响图片，不影响窗口透明度。"
         },
         "emptyEditorWatermark.position": {
           "type": "string",
@@ -119,39 +91,39 @@
             "center"
           ],
           "default": "top-right",
-          "description": "文字块（标识文字 + 命令列表）的位置。hideLogo 与 hideCommands 都为 true 时无视觉影响。"
+          "description": "水印文字块（VS logo + 快捷键提示）的位置。若 hideLogo 与 hideCommands 都为 true，此项没有视觉效果。"
         },
         "emptyEditorWatermark.scale": {
           "type": "number",
           "default": 0.48,
-          "minimum": 0.05,
-          "maximum": 4,
-          "description": "文字块的缩放（transform: scale）。只影响文字块，不影响背景图。"
+          "minimum": 0.1,
+          "maximum": 2,
+          "description": "水印文字块的缩放（transform: scale）。只影响文字块，不影响背景图。"
         },
         "emptyEditorWatermark.hideLogo": {
           "type": "boolean",
           "default": true,
-          "description": "隐藏文字块顶部的标识文字（默认只留背景图）。"
+          "description": "隐藏空编辑器里的 VS Code logo。"
         },
         "emptyEditorWatermark.hideCommands": {
           "type": "boolean",
           "default": true,
-          "description": "隐藏文字块里的命令列表（显示所有命令 / 打开文件 / 克隆 Git 仓库）。"
+          "description": "隐藏空编辑器里的快捷键提示（「显示所有命令」那一列）。"
         },
         "emptyEditorWatermark.panelWidth": {
           "type": "number",
           "default": 261,
-          "description": "文字块宽度（px）。"
+          "description": "水印文字块的宽度（px）。仅在显示 logo / 快捷键提示时有意义。"
         },
         "emptyEditorWatermark.panelFontSize": {
           "type": "number",
           "default": 19,
-          "description": "文字块基准字号（px），会与 scale 叠加。"
+          "description": "水印文字块的基准字号（px），会与 scale 叠加。"
         },
         "emptyEditorWatermark.frostedPanel": {
           "type": "boolean",
           "default": false,
-          "description": "给文字块加半透明磨砂底（图片较花、文字不好认时开启）。"
+          "description": "给水印文字块加半透明磨砂底（图片较花、文字不好认时开启）。"
         }
       }
     }
@@ -159,7 +131,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "check": "npm run compile && node tools/check-page.js && node tools/check-legacy.js && node tools/check-apply.js",
+    "check": "npm run compile && node tools/check-injector.js && node tools/check-apply.js",
     "release": "pwsh -NoProfile -File tools/release.ps1",
     "release:dry": "pwsh -NoProfile -File tools/release.ps1 -DryRun",
     "package": "vsce package"

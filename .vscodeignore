@@ -1,11 +1,7 @@
 .vscode/**
-.vscode-test/**
 .gitignore
 src/**
 tools/**
 tsconfig.json
-package-lock.json
 **/*.map
 node_modules/**
-*.vsix
-.npm-cache/**
