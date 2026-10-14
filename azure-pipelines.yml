@@ -1,0 +1,66 @@
+# Microsoft Entra workload identity federation; publishing requires Publisher membership.
+# Queued runs only package the extension unless publish is explicitly enabled.
+trigger: none
+pr: none
+
+parameters:
+  - name: extensionDirectory
+    type: string
+    default: '.'
+  - name: serviceConnection
+    type: string
+    default: 'vscode-marketplace-oidc'
+  - name: publish
+    type: boolean
+    default: false
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: '${{ parameters.serviceConnection }}'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -eu
+        az rest --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id --output tsv
+    displayName: Verify federated identity and show Marketplace identity ID
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '22.x'
+    displayName: Set up Node.js
+
+  - script: |
+      set -eu
+      if [ -f package-lock.json ]; then
+        npm ci
+      else
+        npm install
+      fi
+      npm run check
+      npx --yes @vscode/vsce package --no-dependencies --out "$(Build.ArtifactStagingDirectory)/extension.vsix"
+    workingDirectory: '${{ parameters.extensionDirectory }}'
+    displayName: Build and package extension
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      artifact: vsix
+    displayName: Save VSIX for review
+
+  - ${{ if eq(parameters.publish, true) }}:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: '${{ parameters.serviceConnection }}'
+        scriptType: bash
+        scriptLocation: inlineScript
+        workingDirectory: '${{ parameters.extensionDirectory }}'
+        inlineScript: |
+          set -eu
+          test -n '${{ parameters.serviceConnection }}'
+          unset VSCE_PAT
+          npx --yes @vscode/vsce publish --packagePath "$(Build.ArtifactStagingDirectory)/extension.vsix" --azure-credential
+      displayName: Publish using Microsoft Entra ID
