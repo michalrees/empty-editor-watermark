@@ -1,6 +1,12 @@
 # Microsoft Entra workload identity federation; publishing requires Publisher membership.
-# Queued runs only package the extension unless publish is explicitly enabled.
-trigger: none
+# Main commits run checks; matching version tags publish automatically.
+trigger:
+  branches:
+    include:
+      - main
+  tags:
+    include:
+      - v*
 pr: none
 
 parameters:
@@ -15,23 +21,28 @@ parameters:
     default: false
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: ubuntu-24.04
 
 steps:
-  - task: AzureCLI@2
+  - task: UseNode@1
     inputs:
-      azureSubscription: '${{ parameters.serviceConnection }}'
-      scriptType: bash
-      scriptLocation: inlineScript
-      inlineScript: |
-        set -eu
-        az rest --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id --output tsv
-    displayName: Verify federated identity and show Marketplace identity ID
-
-  - task: NodeTool@0
-    inputs:
-      versionSpec: '22.x'
+      version: '22.x'
     displayName: Set up Node.js
+
+  - script: |
+      set -eu
+      node <<'JS'
+      const fs = require('fs');
+      const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+      const ref = process.env.BUILD_SOURCEBRANCH;
+      if (ref.startsWith('refs/tags/')) {
+        if (ref !== `refs/tags/v${version}`) {
+          throw new Error(`Tag ${ref} does not match package version ${version}`);
+        }
+      }
+      JS
+    workingDirectory: '${{ parameters.extensionDirectory }}'
+    displayName: Check release tag matches extension version
 
   - script: |
       set -eu
@@ -51,16 +62,16 @@ steps:
       artifact: vsix
     displayName: Save VSIX for review
 
-  - ${{ if eq(parameters.publish, true) }}:
-    - task: AzureCLI@2
-      inputs:
-        azureSubscription: '${{ parameters.serviceConnection }}'
-        scriptType: bash
-        scriptLocation: inlineScript
-        workingDirectory: '${{ parameters.extensionDirectory }}'
-        inlineScript: |
-          set -eu
-          test -n '${{ parameters.serviceConnection }}'
-          unset VSCE_PAT
-          npx --yes @vscode/vsce publish --packagePath "$(Build.ArtifactStagingDirectory)/extension.vsix" --azure-credential
-      displayName: Publish using Microsoft Entra ID
+  - task: AzureCLI@2
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), or(startsWith(variables['Build.SourceBranch'], 'refs/tags/v'), and(eq(variables['Build.Reason'], 'Manual'), ${{ eq(parameters.publish, true) }})))
+    inputs:
+      azureSubscription: '${{ parameters.serviceConnection }}'
+      scriptType: bash
+      scriptLocation: inlineScript
+      workingDirectory: '${{ parameters.extensionDirectory }}'
+      inlineScript: |
+        set -eu
+        test -n '${{ parameters.serviceConnection }}'
+        unset VSCE_PAT
+        npx --yes @vscode/vsce publish --packagePath "$(Build.ArtifactStagingDirectory)/extension.vsix" --azure-credential
+    displayName: Publish using Microsoft Entra ID
