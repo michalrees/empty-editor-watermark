@@ -2,6 +2,17 @@
 
 本文件记录 `YuHaoran251.empty-editor-watermark` 的对外变更。
 
+## 0.2.2 — 2026-10-17
+
+- Add read-only diagnostics, explicit consent tracking and a remove-and-disable command.
+- Serialize updates and replace validated HTML through a checked temporary file to preserve existing content on failure.
+- Move release preparation to GitHub Actions with Marketplace web upload; no Azure subscription is required.
+
+- 仅在用户同意后记录授权；“以后再说”不会导致下次启动自动注入。
+- 移除命令同步关闭开关；合并配置更新并串行执行操作，减少重复重载提示。
+- 应用和移除增加 HTML / 标记校验、同目录暂存与校验后替换、失败清理及文件变更检测；明确报告部分成功。
+- 新增 `Watermark: 一键诊断`，报告目标、权限、图片、备份及注入状态。
+
 ## 0.2.1 — 2026-09-21
 
 **主题：回到 0.1.x 的注入实现（空编辑器里的底图），并顺手把「安装似乎损坏」通知隐藏掉。**

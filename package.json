@@ -2,7 +2,7 @@
   "name": "empty-editor-watermark",
   "displayName": "Empty Editor Watermark",
   "description": "给空编辑器铺自定义背景图（水印），可隐藏 VS logo 与快捷键提示；自带注入器，并自动隐藏 VS Code 的「安装似乎损坏」通知。",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "YuHaoran251",
   "license": "MIT",
   "engines": {
@@ -47,6 +47,11 @@
       {
         "command": "emptyEditorWatermark.showCss",
         "title": "查看生成的水印 CSS",
+        "category": "Watermark"
+      },
+      {
+        "command": "emptyEditorWatermark.diagnose",
+        "title": "一键诊断",
         "category": "Watermark"
       }
     ],

@@ -9,3 +9,10 @@ package-lock.json
 node_modules/**
 *.vsix
 .npm-cache/**
+
+.github/**
+azure-pipelines.yml
+AZURE-PUBLISHING.md
+MARKETPLACE-RELEASE.json
+*.vsix
+*.vsix.sha256

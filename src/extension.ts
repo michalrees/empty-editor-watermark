@@ -1,3 +1,4 @@
+import { validateHtml, writeHtmlSafely } from './fileSafety';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -21,7 +22,7 @@ import {
 const SECTION = 'emptyEditorWatermark';
 const BAK_SUFFIX = '.bak-empty-editor-watermark';
 const DEFAULT_IMAGE = path.join('media', 'default-bg.svg');
-const CONSENT_KEY = 'emptyEditorWatermark.consentAsked';
+const CONSENT_KEY = 'emptyEditorWatermark.consentGranted';
 
 interface ImageChoice {
   file: string;
@@ -97,6 +98,46 @@ function readOptions(context: vscode.ExtensionContext): { options: WatermarkOpti
 
 class WatermarkService {
   private warnedProblem = '';
+  private pendingApply: ReturnType<typeof setTimeout> | undefined;
+  private updatingSettings = false;
+  private operations: Promise<void> = Promise.resolve();
+
+  public enqueue(operation: () => Promise<void>): Promise<void> {
+    const result = this.operations.then(operation);
+    this.operations = result.catch((err) => {
+      this.log(String(err));
+      void vscode.window.showErrorMessage('Empty Editor Watermark：操作失败，详见输出面板。');
+    });
+    return this.operations;
+  }
+
+  public configurationChanged(): void {
+    if (this.updatingSettings) { return; }
+    if (this.pendingApply) { clearTimeout(this.pendingApply); }
+    this.pendingApply = setTimeout(() => {
+      this.pendingApply = undefined;
+      void this.enqueue(() => this.ensureApplied());
+    }, 150);
+  }
+
+  public dispose(): void {
+    if (this.pendingApply) { clearTimeout(this.pendingApply); }
+  }
+
+  public async removeAndDisable(): Promise<void> {
+    this.updatingSettings = true;
+    try {
+      const cfg = vscode.workspace.getConfiguration(SECTION);
+      // 工作区配置会覆盖全局配置；同时关闭已有的工作区覆盖值。
+      await cfg.update('enabled', false, vscode.ConfigurationTarget.Global);
+      if (cfg.inspect<boolean>('enabled')?.workspaceValue !== undefined) {
+        await cfg.update('enabled', false, vscode.ConfigurationTarget.Workspace);
+      }
+    } finally {
+      this.updatingSettings = false;
+    }
+    await this.remove(true);
+  }
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -147,7 +188,7 @@ class WatermarkService {
     if (fs.existsSync(bak)) {
       return;
     }
-    fs.writeFileSync(bak, html, 'utf8');
+    fs.writeFileSync(bak, html, { encoding: 'utf8', flag: 'wx' });
     this.log(`已备份原文件 → ${bak}`);
   }
 
@@ -167,16 +208,18 @@ class WatermarkService {
     }
   }
 
-  private describeFailures(failures: Array<{ file: string; err: unknown }>): void {
+  private describeFailures(failures: Array<{ file: string; err: unknown }>, completed: string[]): void {
     const first = failures[0];
     const code = (first.err as NodeJS.ErrnoException)?.code ?? '';
     const detail = first.err instanceof Error ? first.err.message : String(first.err);
-    this.log(`写入失败：${first.file} —— ${detail}`);
+    for (const failure of failures) {
+      this.log(`写入失败：${failure.file} —— ${String(failure.err)}`);
+    }
     const hint =
       code === 'EPERM' || code === 'EACCES'
         ? '没有写权限。请**以管理员身份重启 VS Code** 后再执行一次；或手动给该文件加上当前用户的写权限。'
         : '详见输出面板「Empty Editor Watermark」。';
-    void vscode.window.showErrorMessage(`Empty Editor Watermark：写入 ${path.basename(first.file)} 失败（${code || detail}）。${hint}`);
+    void vscode.window.showErrorMessage(`Empty Editor Watermark：${completed.length ? '部分成功，已更新 ' + completed.join('、') + '，这些更改需重载后生效。' : '未更新任何文件。'}失败：${failures.map(f => path.basename(f.file)).join('、')}（${code || detail}）。${hint}`);
   }
 
   /** 应用/更新注入。interactive=true 表示用户主动触发（会给出更明确的反馈） */
@@ -188,6 +231,9 @@ class WatermarkService {
       return;
     }
 
+    if (interactive) {
+      await this.context.globalState.update(CONSENT_KEY, true);
+    }
     const { image } = readOptions(this.context);
     this.reportProblem(image.problem);
     const blocks = this.desiredBlocks();
@@ -204,10 +250,11 @@ class WatermarkService {
     for (const file of targets) {
       try {
         const html = fs.readFileSync(file, 'utf8');
-        this.backupOnce(file, html);
+        validateHtml(html);
         const { html: next, changed } = applyBlocks(html, blocks);
         if (changed) {
-          fs.writeFileSync(file, next, 'utf8');
+          this.backupOnce(file, html);
+          writeHtmlSafely(file, html, next);
           updated.push(path.basename(file));
           this.log(`已写入 ${file}`);
         } else {
@@ -219,7 +266,7 @@ class WatermarkService {
     }
 
     if (failures.length) {
-      this.describeFailures(failures);
+      this.describeFailures(failures, updated);
       return;
     }
     if (updated.length === 0) {
@@ -240,13 +287,14 @@ class WatermarkService {
     for (const file of this.workbenchFiles()) {
       try {
         const html = fs.readFileSync(file, 'utf8');
+        validateHtml(html);
         let next = html;
         for (const markers of ALL_MARKERS) {
           next = stripBlock(next, markers).html;
         }
         const did = next !== html;
         if (did) {
-          fs.writeFileSync(file, next, 'utf8');
+          writeHtmlSafely(file, html, next);
           removed.push(path.basename(file));
           this.log(`已移除 ${file} 中的注入`);
         }
@@ -256,7 +304,7 @@ class WatermarkService {
     }
 
     if (failures.length) {
-      this.describeFailures(failures);
+      this.describeFailures(failures, removed);
       return;
     }
     if (removed.length === 0) {
@@ -306,7 +354,6 @@ class WatermarkService {
 
     // 第一次装上就默默改安装目录不合适，先问一次（之后一直自动）
     if (!this.context.globalState.get<boolean>(CONSENT_KEY, false)) {
-      await this.context.globalState.update(CONSENT_KEY, true);
       const pick = await vscode.window.showInformationMessage(
         'Empty Editor Watermark 需要往 VS Code 安装目录的 workbench.html 写入一段样式（这是给空编辑器铺背景图/隐藏水印文字的唯一方式，VS Code 没有相关 API）。是否现在应用？',
         '应用水印',
@@ -316,10 +363,48 @@ class WatermarkService {
         this.log('用户选择稍后；之后可在命令面板执行「Watermark: 应用/更新水印」');
         return;
       }
+      await this.context.globalState.update(CONSENT_KEY, true);
     }
 
     this.log('检测到注入缺失或已过期（常见于 VS Code 更新后），自动补齐');
     await this.apply(false);
+  }
+
+  /** 只读诊断，报告磁盘状态，不自动应用或重载。 */
+  public async diagnose(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration(SECTION);
+    const { image } = readOptions(this.context);
+    const lines = ['Empty Editor Watermark 诊断', `appRoot: ${vscode.env.appRoot}`,
+      `总开关: ${cfg.get<boolean>('enabled', true) ? '开' : '关'}`,
+      `隐藏损坏通知: ${cfg.get<boolean>('hideCorruptNotice', true) ? '开' : '关'}`,
+      `背景图: ${image.file}`, `图片配置: ${image.problem || '正常'}`];
+    try {
+      if (!fs.statSync(image.file).isFile()) { throw new Error('路径不是文件'); }
+      fs.accessSync(image.file, fs.constants.R_OK);
+      lines.push('图片文件: 存在且可读（未验证图片解码）');
+    } catch (err) { lines.push(`图片文件: 不可用，${String(err)}`); }
+    const targets = this.workbenchFiles();
+    if (!targets.length) { lines.push('目标文件: 未找到 workbench.html / workbench.esm.html'); }
+    for (const file of targets) {
+      lines.push('', `目标文件: ${file}`);
+      try {
+        fs.accessSync(file, fs.constants.W_OK);
+        fs.accessSync(path.dirname(file), fs.constants.W_OK);
+        lines.push('写权限: 文件和目录检查通过（实际写入仍可能受系统限制）');
+      } catch (err) { lines.push(`写权限: 不可写，${String(err)}`); }
+      lines.push(`首次备份: ${fs.existsSync(file + BAK_SUFFIX) ? '存在' : '不存在'}`);
+      try {
+        const html = fs.readFileSync(file, 'utf8');
+        validateHtml(html);
+        lines.push(`水印块: ${hasBlock(html) ? '完整' : '未注入'}`,
+          `通知隐藏块: ${hasBlock(html, NOTICE_MARKERS) ? '完整' : '未注入'}`);
+        const expected = cfg.get<boolean>('enabled', true) ? this.desiredBlocks() : [];
+        lines.push(`与当前配置: ${applyBlocks(html, expected).changed ? '不一致，需应用/移除并重载' : '一致'}`);
+      } catch (err) { lines.push(`HTML / 注入状态: ${String(err)}`); }
+    }
+    lines.push('', '以上为磁盘状态；当前窗口是否已重载、通知 CSS 是否匹配实际界面，需要在窗口中确认。');
+    const doc = await vscode.workspace.openTextDocument({ content: lines.join('\n'), language: 'plaintext' });
+    await vscode.window.showTextDocument(doc, { preview: true });
   }
 
   /** 选一张背景图并写进设置 */
@@ -338,8 +423,13 @@ class WatermarkService {
     if (!picked || picked.length === 0) {
       return;
     }
-    await cfg.update('imagePath', picked[0].fsPath, vscode.ConfigurationTarget.Global);
-    await cfg.update('enabled', true, vscode.ConfigurationTarget.Global);
+    this.updatingSettings = true;
+    try {
+      await cfg.update('imagePath', picked[0].fsPath, vscode.ConfigurationTarget.Global);
+      await cfg.update('enabled', true, vscode.ConfigurationTarget.Global);
+    } finally {
+      this.updatingSettings = false;
+    }
     await this.apply(true);
   }
 
@@ -369,18 +459,20 @@ export function activate(context: vscode.ExtensionContext): void {
   const service = new WatermarkService(context, out);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('emptyEditorWatermark.apply', () => service.apply(true)),
-    vscode.commands.registerCommand('emptyEditorWatermark.remove', () => service.remove(true)),
-    vscode.commands.registerCommand('emptyEditorWatermark.pickImage', () => service.pickImage()),
+    service,
+    vscode.commands.registerCommand('emptyEditorWatermark.apply', () => service.enqueue(() => service.apply(true))),
+    vscode.commands.registerCommand('emptyEditorWatermark.remove', () => service.enqueue(() => service.removeAndDisable())),
+    vscode.commands.registerCommand('emptyEditorWatermark.pickImage', () => service.enqueue(() => service.pickImage())),
+    vscode.commands.registerCommand('emptyEditorWatermark.diagnose', () => service.enqueue(() => service.diagnose())),
     vscode.commands.registerCommand('emptyEditorWatermark.showCss', () => service.showCss()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(SECTION)) {
-        void service.apply(false);
+        service.configurationChanged();
       }
     })
   );
 
-  void service.ensureApplied();
+  void service.enqueue(() => service.ensureApplied());
 }
 
 export function deactivate(): void {

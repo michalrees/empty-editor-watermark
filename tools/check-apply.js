@@ -67,20 +67,24 @@ function makeEnv(settings) {
 
   const messages = [];
   const commands = new Map();
+  let configurationListener = () => {};
+  const informationMessages = [];
+  const documents = [];
   const vscodeStub = {
     env: { appRoot: root },
+    ConfigurationTarget: { Global: 1, Workspace: 2 },
     Uri: {
       file: (p) => ({ fsPath: p }),
       parse: (s) => ({ fsPath: String(s).replace(/^file:\/\/\//i, '').replace(/\//g, '\\') })
     },
     workspace: {
-      getConfiguration: () => ({ get: (key, def) => (key in settings ? settings[key] : def), update: async () => {} }),
-      onDidChangeConfiguration: () => ({ dispose() {} }),
-      openTextDocument: async () => ({})
+      getConfiguration: () => ({ get: (key, def) => (key in settings ? settings[key] : def), inspect: () => undefined, update: async (key, value) => { settings[key] = value; configurationListener({ affectsConfiguration: () => true }); } }),
+      onDidChangeConfiguration: (listener) => { configurationListener = listener; return { dispose() {} }; },
+      openTextDocument: async (options) => { documents.push(options.content); return {}; }
     },
     window: {
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
-      showInformationMessage: async (_msg, ...items) => items[0],
+      showInformationMessage: async (msg, ...items) => { informationMessages.push(msg); return items[0]; },
       showWarningMessage: async (msg) => {
         messages.push('warn:' + msg);
         return undefined;
@@ -113,7 +117,7 @@ function makeEnv(settings) {
     }
   };
 
-  return { root, wbFile, settings, vscodeStub, context, commands, messages };
+  return { root, wbFile, settings, vscodeStub, context, commands, messages, documents, informationMessages, changeConfiguration: () => configurationListener({ affectsConfiguration: () => true }) };
 }
 
 function loadExtension(vscodeStub) {
@@ -250,6 +254,91 @@ const read = (f) => fs.readFileSync(f, 'utf8');
     threw = e;
   }
   ok('不抛异常', threw === null, threw && threw.stack);
+
+  console.log('\n== 授权、持久移除与合并配置更新 ==');
+  const deferred = makeEnv({});
+  deferred.vscodeStub.window.showInformationMessage = async () => '以后再说';
+  loadExtension(deferred.vscodeStub).activate(deferred.context);
+  await tick();
+  loadExtension(deferred.vscodeStub).activate(deferred.context);
+  await tick();
+  ok('推迟后重启仍不注入', read(deferred.wbFile) === SAMPLE);
+  ok('推迟不记录授权', !deferred.context.globalState.get('emptyEditorWatermark.consentGranted', false));
+  deferred.changeConfiguration();
+  await new Promise(r => setTimeout(r, 250));
+  ok('推迟后修改配置也不绕过授权', read(deferred.wbFile) === SAMPLE);
+
+  ok('移除命令同时关闭开关', env4.settings.enabled === false);
+  loadExtension(env4.vscodeStub).activate(env4.context);
+  await tick();
+  ok('移除后重启不会恢复注入', read(env4.wbFile) === SAMPLE);
+
+  const beforePrompts = env1.informationMessages.length;
+  env1.settings.opacity = 0.22;
+  env1.changeConfiguration();
+  env1.settings.opacity = 0.24;
+  env1.changeConfiguration();
+  await new Promise(r => setTimeout(r, 250));
+  ok('连续配置变化只提示一次', env1.informationMessages.length === beforePrompts + 1);
+  ok('使用最终配置', read(env1.wbFile).includes('opacity: 0.24'));
+  const picker = makeEnv({});
+  loadExtension(picker.vscodeStub).activate(picker.context);
+  await tick();
+  const pickerPrompts = picker.informationMessages.length;
+  picker.vscodeStub.window.showOpenDialog = async () => [{ fsPath: imgPath }];
+  await picker.commands.get('emptyEditorWatermark.pickImage')();
+  await new Promise(r => setTimeout(r, 250));
+  ok('选图更新两个设置只提示一次', picker.informationMessages.length === pickerPrompts + 1);
+  ok('选图正确更新背景', read(picker.wbFile).includes('my%20pic.png'));
+  fs.rmSync(picker.root, { recursive: true, force: true });
+  fs.rmSync(deferred.root, { recursive: true, force: true });
+
+  console.log('\n== 安全写入与诊断 ==');
+  const safe = require('../out/fileSafety');
+  const safetyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'eew-safe-'));
+  const safetyFile = path.join(safetyRoot, 'workbench.html');
+  fs.writeFileSync(safetyFile, SAMPLE);
+  const replacement = SAMPLE.replace('<head>', '<head><!-- staged -->');
+  const rename = fs.renameSync;
+  try {
+    fs.renameSync = () => { throw new Error('模拟替换失败'); };
+    let rejected = false;
+    try { safe.writeHtmlSafely(safetyFile, SAMPLE, replacement); } catch { rejected = true; }
+    ok('替换失败时保留原文件', rejected && read(safetyFile) === SAMPLE);
+    ok('失败后清理暂存文件', fs.readdirSync(safetyRoot).length === 1);
+  } finally { fs.renameSync = rename; }
+  let malformedRejected = false;
+  try { safe.writeHtmlSafely(safetyFile, SAMPLE, SAMPLE + '<!-- EMPTY-EDITOR-WATERMARK:START -->'); } catch { malformedRejected = true; }
+  ok('拒绝残缺标记并保留原文件', malformedRejected && read(safetyFile) === SAMPLE);
+  let concurrentRejected = false;
+  fs.writeFileSync(safetyFile, replacement);
+  try { safe.writeHtmlSafely(safetyFile, SAMPLE, SAMPLE); } catch { concurrentRejected = true; }
+  ok('检测到其他操作修改后不覆盖', concurrentRejected && read(safetyFile) === replacement);
+  safe.writeHtmlSafely(safetyFile, replacement, SAMPLE);
+  ok('正常替换成功', read(safetyFile) === SAMPLE);
+
+  const partial = makeEnv({});
+  const brokenFile = path.join(path.dirname(partial.wbFile), 'workbench.esm.html');
+  fs.writeFileSync(brokenFile, '<html>broken');
+  loadExtension(partial.vscodeStub).activate(partial.context);
+  await tick();
+  ok('部分成功明确报告两种结果', partial.messages.some(m => m.includes('部分成功') && m.includes('workbench.esm.html')));
+  ok('不完整的 HTML 保持原样', read(brokenFile) === '<html>broken');
+  const beforeDiagnosis = read(partial.wbFile);
+  await partial.commands.get('emptyEditorWatermark.diagnose')();
+  const report = partial.documents.at(-1);
+  ok('诊断包含图片、权限和注入状态', report.includes('图片文件: 存在且可读') && report.includes('写权限:') && report.includes('水印块: 完整'));
+  ok('诊断标出异常 HTML', report.includes('不是完整的 HTML'));
+  ok('诊断不修改目标文件', read(partial.wbFile) === beforeDiagnosis);
+  const missing = makeEnv({});
+  fs.unlinkSync(missing.wbFile);
+  loadExtension(missing.vscodeStub).activate(missing.context);
+  await tick();
+  await missing.commands.get('emptyEditorWatermark.diagnose')();
+  ok('诊断明确报告目标缺失', missing.documents.at(-1).includes('目标文件: 未找到'));
+  for (const dir of [safetyRoot, partial.root, missing.root, env3.root, envN.root]) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 
   // 清理
   for (const dir of [env1.root, env4.root, env5.root, emptyRoot]) {
