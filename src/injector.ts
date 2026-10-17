@@ -56,8 +56,9 @@ export function toVscodeFileUrl(fsPath: string): string {
   const p = String(fsPath ?? '').replace(/\\/g, '/');
   const m = /^([A-Za-z]):(\/.*)?$/.exec(p);
   if (!m) {
-    // UNC / POSIX 路径：没有盘符，退化成整体编码（是否能加载取决于 VS Code 版本）
-    return 'vscode-file://vscode-app/' + p.split('/').map(encodeURIComponent).join('/');
+    // POSIX already starts with a slash; adding another changes the URL path.
+    const prefix = p.startsWith('/') && !p.startsWith('//') ? 'vscode-file://vscode-app' : 'vscode-file://vscode-app/';
+    return prefix + p.split('/').map(encodeURIComponent).join('/');
   }
   const drive = m[1].toLowerCase() + '%3A';
   const rest = m[2] ?? '';

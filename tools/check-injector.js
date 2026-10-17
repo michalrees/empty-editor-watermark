@@ -48,6 +48,9 @@ check('正斜杠输入同样处理', inj.toVscodeFileUrl('D:/x/y.jpg'),
   'vscode-file://vscode-app/d%3A/x/y.jpg');
 
 // ── 2. CSS 生成 ────────────────────────────────────────────────
+check('POSIX 路径不产生双斜杠', inj.toVscodeFileUrl('/home/user/a b.png'), 'vscode-file://vscode-app/home/user/a%20b.png');
+check('Linux 中文图片路径编码', inj.toVscodeFileUrl('/home/user/图片/背景 (18).jpg'), 'vscode-file://vscode-app/home/user/%E5%9B%BE%E7%89%87/%E8%83%8C%E6%99%AF%20(18).jpg');
+
 console.log('\n== buildCss ==');
 const base = {
   imageUrl: 'vscode-file://vscode-app/e%3A/a.jpg',

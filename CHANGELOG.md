@@ -2,6 +2,11 @@
 
 本文件记录 `YuHaoran251.empty-editor-watermark` 的对外变更。
 
+## 0.2.3 — 2026-10-17
+
+- Fix POSIX image URL construction to use one leading path slash; Linux/macOS absolute paths previously produced a double slash.
+- Add regression checks for POSIX paths, spaces and non-ASCII filenames.
+
 ## 0.2.2 — 2026-10-17
 
 - Add read-only diagnostics, explicit consent tracking and a remove-and-disable command.
