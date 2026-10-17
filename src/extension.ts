@@ -276,7 +276,7 @@ class WatermarkService {
       return;
     }
     this.log('完成，等待重载窗口生效');
-    await this.promptReload('水印（与「安装损坏」提示的隐藏规则）已写入 workbench.html，重载窗口后生效。');
+    await this.promptReload('水印已写入 workbench.html，重载窗口后生效。');
   }
 
   /** 移除注入（只删本扩展那段；be5invis / shalldie 的注入保持原样） */

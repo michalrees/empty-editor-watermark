@@ -2,6 +2,10 @@
 
 本文件记录 `YuHaoran251.empty-editor-watermark` 的对外变更。
 
+## 0.2.4 — 2026-10-17
+
+- Simplify the apply-success notification text; behavior and reload actions are unchanged.
+
 ## 0.2.3 — 2026-10-17
 
 - Fix POSIX image URL construction to use one leading path slash; Linux/macOS absolute paths previously produced a double slash.
